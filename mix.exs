@@ -21,8 +21,10 @@ defmodule EctoTimexDuration.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:postgrex, "~> 0.14.0 or ~> 0.15.0 or ~> 0.16.0", optional: true},
+      {:ecto, "~> 3.0", optional: true},
+      {:phoenix_html, "~> 3.0", optional: true},
+      {:timex, "~> 3.7"}
     ]
   end
 end
