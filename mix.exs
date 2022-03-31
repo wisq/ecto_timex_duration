@@ -23,7 +23,6 @@ defmodule EctoTimexDuration.MixProject do
     [
       {:postgrex, "~> 0.14.0 or ~> 0.15.0 or ~> 0.16.0", optional: true},
       {:ecto, "~> 3.0", optional: true},
-      {:phoenix_html, "~> 3.0", optional: true},
       {:timex, "~> 3.7"}
     ]
   end

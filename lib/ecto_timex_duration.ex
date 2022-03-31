@@ -93,18 +93,4 @@ if Code.ensure_loaded?(Postgrex) do
     defp to_string(:secs, n), do: "T#{n}"
     defp to_string(:microsecs, n), do: "." <> String.pad_leading("#{n}", 6, "0")
   end
-
-  defimpl Inspect, for: [Postgrex.Interval] do
-    def inspect(inv, _opts) do
-      inspect(Map.from_struct(inv))
-    end
-  end
-
-  if Code.ensure_loaded?(Phoenix.HTML.Safe) do
-    defimpl Phoenix.HTML.Safe, for: [Postgrex.Interval] do
-      def to_iodata(inv) do
-        to_string(inv)
-      end
-    end
-  end
 end
