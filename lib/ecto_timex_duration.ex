@@ -26,7 +26,12 @@ if Code.ensure_loaded?(Postgrex) do
          |> Enum.sum()
          |> Timex.Duration.from_microseconds()}
       catch
-        :unsupported -> :error
+        :unsupported ->
+          raise(
+            ArgumentError,
+            "Cannot convert #{inspect(interval)} into Timex.Duration: " <>
+              "non-zero months/days are not supported"
+          )
       end
     end
 
