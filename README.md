@@ -30,35 +30,61 @@ Then in your Ecto schema, use `Ecto.Timex.Duration` as a field type:
 
 ## Limitations
 
-Postgres and `Timex.Duration` have a different idea how days, months, and years work — basically any unit larger than hours.
+**This library cannot handle Postgres intervals that contain a non-zero number of days, weeks, months, or years.**
 
-Specifically, `Timex.Duration.from_days(1)` is the same as `Timex.Duration.from_hours(24)` or `Timex.Duration.from_seconds(86400)` — all three are stored as 86400 seconds, even though this is not always the case when daylight savings is concerned.
+If you attempt to store `Timex.Duration.from_days(10)`, it will be stored as `240 hours` in interval format, and can be read back just fine.
 
-`Timex.Duration` also has no real concept of months or years — there are no `from_month` or `from_year` functions.  Since it only stores durations as seconds, there's no safe way to handle these concepts — every month (and every fourth year) has a different number of seconds than the last.
-
-Conversely, Postgres keeps all these units separated.  If you add an interval of `1 day` or `1 month` or `1 year` to a `date` or `timestamp`, it will just increment the corresponding field.  Furthermore, it has no automatic conversion between months, days, and time units — an interval of `1 month 50 days 240 hours` is perfectly acceptable (and is NOT the same as `80 days 240 hours` or `1 month 60 days`).
-
-This leads to some major discrepancies in how the two handle date arithmetic:
-
-| Start date             | Interval  | Timex                | Postgres             | Match    |
-| ----------             | --------  | -----                | --------             | -----    |
-| 2022-03-01 06:00 EST   | 15 days   | 2022-03-16 07:00 EDT | 2022-03-16 06:00 EDT | &#10060; |
-| 2022-03-01 06:00 EST   | 360 hours | 2022-03-16 07:00 EDT | 2022-03-16 07:00 EDT | &#9989;  |
-| 2022-02-01             | 1 month¹  | 2022-03-03           | 2022-03-01           | &#10060; |
-| 2022-02-01             | 30 days   | 2022-03-03           | 2022-03-03           | &#9989;  |
-| 2024-01-01 (leap year) | 1 year²   | 2024-12-31           | 2025-01-01           | &#10060; |
-| 2022-01-01             | 1 year²   | 2023-01-01           | 2023-01-01           | &#9989;  |
-
-¹ simulated using `Timex.Duration.from_days(30)`<br/>
-² simulated using `Timex.Duration.from_days(365)` (and identical to `12 months` in Postgres)
-
-This means that **there is no safe way to represent Postgres "day" or "month" intervals as `Timex.Duration` objects**, since these are fundamentally different concepts in each environment.  Accordingly, if this library is asked to handle a Postgres interval with a non-zero `month` or `day` figure, it will raise an error instead.
-
-Does this mean you can't store large `Timex.Duration` objects with this library?  **No!**  As per above, Postgres can handle time values much larger than a single day.  If you take a `Timex.Duration.from_days(1)` structure and store it using this library, you'll end up with an interval of `24 hours`.  A `from_days(30)` structure (to *very crudely* simulate a month) would be stored as `720 hours`.
+However, if your database contains an interval of `10 days` and you try to read it with this library, you'll get an error.  This is by design, since **there is no safe & correct way to handle units larger than hours** in a `Timex.Duration` — yes, despite it having a `from_days` function.
 
 As long as you're okay with this limitation, this library should work fine for you.  Everything will effectively use (micro)seconds as a base unit, your `Timex.Duration` math will exactly match your Postgres SQL math, and nothing unexpected will happen.  (Just make sure nobody sneaks actual days or months into the database.)
 
+### The gorey details
+
+Postgres and `Timex.Duration` have a different idea how days, months, and years work — basically any unit larger than hours.
+
+Postgres intervals track months, days, and time separately:
+
+```sql
+# select '2020-03-01 00:00 EST'::timestamp with time zone + '15 days'::interval;
+2020-03-16 00:00:00-04
+
+# select '2020-03-01 00:00 EST'::timestamp with time zone + '1 month'::interval;
+2020-04-01 00:00:00-04
+
+# select '2020-03-01 00:00 EST'::timestamp with time zone + '1 year'::interval;
+2021-03-01 00:00:00-05
+```
+
+Conversely, `Timex.Duration.from_days(1)` is the same as `Timex.Duration.from_hours(24)` or `Timex.Duration.from_seconds(86400)` — all three are stored as 86400 seconds, even though this is not always the case when daylight savings is concerned:
+
+```elixir
+iex(1)> ~D[2022-03-01] |> Timex.to_datetime("America/Toronto") |> Timex.add(Timex.Duration.from_days(15))
+#DateTime<2022-03-16 01:00:00-04:00 EDT America/Toronto>
+```
+
+Note that the time has changed by one hour, due to daylight savings.  That's because what Timex is **really** doing is more akin to this:
+
+```sql
+# select '2020-03-01 00:00 EST'::timestamp with time zone + '360 hours'::interval;
+2020-03-16 01:00:00-04
+```
+
+To emulate how Postgres treats `15 days`, you would need to use `Timex.shift/2` instead:
+
+```elixir
+iex(2)> ~D[2022-03-01] |> Timex.to_datetime("America/Toronto") |> Timex.shift(days: 15)
+#DateTime<2022-03-16 00:00:00-04:00 EDT America/Toronto>
+```
+
+`Timex.Duration` also has no real concept of months or years — there are no `from_month` or `from_year` functions.  Since it only stores durations as seconds, there's no sane way to handle these concepts — every month (and every fourth year) has a different number of seconds than the last.
+
+(Yes, if you `inspect` a `Timex.Duration` structure, you'll find that it *pretends* to understand days and months — e.g. `Timex.Duration.from_days(45) |> inspect` results in `#<Duration(P1M15D)>`, suggesting a once-month fifteen-day interval in ISO 8601 format.  However, this is **incorrect** — it would be much more correctly represented as `PT1080H`, a 1080-hour interval.)
+
+Does this mean you can't store large `Timex.Duration` objects with this library?  **No!**  As per above, Postgres can handle time values much larger than a single day.  If you take a `Timex.Duration.from_days(1)` structure and store it using this library, you'll end up with an interval of `24 hours`.  A `from_days(30)` structure (to *very crudely* simulate a month) would be stored as `720 hours`.
+
 If you actually want **correct** day and month arithmetic, you'll have to store them separately and use `Timex.shift/2` to adjust those date fields directly.  (Consider using [ecto_interval][1] instead.)
+
+(Of course, I **could** create some sort of `ExtendedDuration` module that wraps integer months, integer days, and a `Timex.Duration` for the time component.  But that would introduce a whole bunch of complexity and additional functions — and it wouldn't be compatible with other `Timex` functions — so it sorta defeats the purpose of this library, which is to store intervals as a simple & familiar datatype.)
 
 ## Acknowledgements
 
